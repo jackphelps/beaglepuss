@@ -32,11 +32,6 @@ yddy+:-.`        .dsoho:.oh-           :dy`         `.
 * Obfuscates sequential numeric IDs through reversable hashing
 * NOT FOR SECURITY! This is no balaclava w/ sunglasses and vocoder (don't rob banks without them)
   * ... it's just silly glasses with eyebrows and a mustache
-* Overrides ActiveRecord::Base behavior (you've been warned)
-* Automatically falls back to integer IDs
-* I don't think you should actually use this as-is; consider hacking it apart and using only in (de)/serialization
-
-## but if you did want to use it:
 
 #### put in config/initializers:
 ```
@@ -56,8 +51,23 @@ end
 
 #### now your IDs are obfuscated
 ```
-User.last.id
+User.last.masked_id
 => us_asdf1234567890
 
+User.decode("us_asdf1234567890")
+=> #<User:0x0...
+
+Plus...
+User.beaglepuss?
+=> true
+Purchase.beaglepuss?
+=> false
+
+etc.
+
+#### also
+Lazily didn't split up, but it really should be.
+
 ### credit:
-slightly inspired by obfuscate_id gem, but its implementation was pretty weird.
+slightly inspired by obfuscate_id gem, but its implementation was pretty weird and didn't handle many cases.
+this handles varying sized IDs along with prefixes and specified alphabets elegantly.

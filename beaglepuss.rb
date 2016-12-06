@@ -1,7 +1,29 @@
 module Beaglepuss
-  require "beaglepuss/config"
   class << self
     attr_accessor :config
+  end
+
+  class Config
+    attr_accessor :shuffle_salt, :min_mask_length, :base_alphabet, :prefix_separator
+    attr_reader :encoded_chunk_size, :unencoded_chunk_size
+
+    def initialize
+      # Integer # so your app doesn't produce the same masked IDs as everyone else's
+      @shuffle_salt           = 0
+      # Integer, default 8 # ensure even small numeric IDs produce a relatively opaquely sized mask
+      @min_mask_length        = 8
+      # prefix identified by the first occurrence of this character; do not use it in your prefixes!
+      @prefix_separator       = "_"
+
+      # alternative hashing alphabet
+      # include Radix (https://github.com/rubyworks/radix) and pass an array to base
+      # radix creates a new base number system from the array contents for easy conversion
+      @base_alphabet          = 36
+
+      # I think I can calc efficient values for these based on alphabet but was having trouble...
+      @encoded_chunk_size     = 2
+      @unencoded_chunk_size   = 3
+    end
   end
 
   def self.configure
@@ -17,24 +39,9 @@ module Beaglepuss
   end
 
   module ClassMethods
-    def find(id)
-      id = Beaglepuss.decode(id)
-      super
+    def decode(masked_id)
+      find(Beaglepuss.decode(masked_id))
     end
-
-    # These basically work, but they're really a terrible idea.
-
-    # def find_by(*args)
-    #   super unless args[0] && args[0].is_a?(Hash) && args[0][:id] && Beaglepuss.decodable?(args[0][:id])
-    #   args[0][:id] = Beaglepuss.decode(args[0][:id])
-    #   super
-    # end
-
-    # def where(*args)
-    #   super unless args[0] && args[0].is_a?(Hash) && args[0][:id] && Beaglepuss.decodable?(args[0][:id])
-    #   args[0][:id] = Beaglepuss.decode(args[0][:id])
-    #   super
-    # end
 
     def beaglepuss?
       true
@@ -42,16 +49,8 @@ module Beaglepuss
   end
 
   module InstanceMethods
-    def to_param
-      Beaglepuss.encode(numeric_id, beaglepuss_prefix)
-    end
-
-    def id
-      to_param
-    end
-
-    def numeric_id
-      self.read_attribute(:id)
+    def masked_id
+      Beaglepuss.encode(id, beaglepuss_prefix)
     end
 
     def beaglepuss?
@@ -66,27 +65,12 @@ module Beaglepuss
   end
 
   def decode(masked_id)
-    # if fallbacks are OFF and we're passed an integer id, raise a record not found error
-    raise ActiveRecord::RecordNotFound if config.prevent_fallback == true && integer_id?(masked_id)
-    # if passed anything other than a string, do whatever ActiveRecord would do
-    return masked_id unless masked_id.is_a?(String)
     raw = strip_prefix(masked_id)
     unswapped = unswap(raw)
     unshuffle(unswapped).to_i
   end
 
-  def decodable?(var)
-    var.is_a?(Integer) || var.is_a?(String) ? true : false
-  end
-
   private
-
-  def integer_id?(id)
-    return true if id.is_a?(Integer)
-    # check if a string is a string version of an integer
-    return false unless id.is_a?(String)
-    id.to_i.to_s == id ? true : false
-  end
 
   def pad_and_shuffle(numeric_id)
     id_str = numeric_id.to_s
@@ -95,29 +79,28 @@ module Beaglepuss
   end
 
   def shuffle(str)
-    array, rotations = shuffle_setup(str)
-    # array = (0...array.size).map{|index| (array[index].to_i + index) % 10}
-    array.size.times.map{ array.rotate!(rotations).pop }.join("")
+    array = str.split("")
+    array = array.size.times.map{|index| (array[index].to_i + index) % 10}
+    rotations = rotations(array)
+    array.size.times.map{ array.rotate!(rotations).pop }.join
   end
 
   def unshuffle(str)
-    array, rotations = shuffle_setup(str)
+    array = str.split("")
+    rotations = rotations(array)
     new_array = []
     array.size.times do
       new_array << array.pop
       new_array.rotate!(rotations * -1)
     end
-    new_array.join
-    # (0...new_array.size).map{|index| (new_array[index].to_i - index) % 10}.join
+    new_array.size.times.map{|index| (new_array[index].to_i - index) % 10}.join
   end
 
-  def shuffle_setup(str)
-    array = str.split("")
+  def rotations(array)
     char_sum = array.reduce(0){|sum, char| sum + char.to_i }
     # use the sum of the integer characters -- which remains consistent regardless of the order -- plus the salt
     # modulo size minus 1 and add one after so we never rotate(0)
-    rotations = ((char_sum) % (array.size - 1)) + 1
-    [array, rotations]
+    (config.shuffle_salt + char_sum % (array.size - 1)) + 1
   end
 
   def strip_prefix(str)
@@ -154,4 +137,5 @@ module Beaglepuss
     Regexp.new(str)
   end
 end
+
 ActiveRecord::Base.extend Beaglepuss
